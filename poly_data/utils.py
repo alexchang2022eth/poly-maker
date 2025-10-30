@@ -2,6 +2,9 @@ import json
 from poly_utils.google_utils import get_spreadsheet
 import pandas as pd 
 import os
+import time
+from web3 import Web3
+from web3.exceptions import TransactionNotFound, TimeExhausted
 
 def pretty_print(txt, dic):
     print("\n", txt, json.dumps(dic, indent=4))
@@ -66,3 +69,131 @@ def get_sheet_df(read_only=None):
             hyperparams.setdefault(current_type, {})[r['param']] = value
 
     return result, hyperparams
+
+
+# ===== Transaction Utilities =====
+
+def get_raw_tx_bytes(signed_tx):
+    raw = getattr(signed_tx, "rawTransaction", None)
+    if raw is None:
+        raw = getattr(signed_tx, "raw_transaction", None)
+    return raw
+
+
+def get_pending_nonce(web3, address):
+    try:
+        return web3.eth.get_transaction_count(address, 'pending')
+    except Exception:
+        return web3.eth.get_transaction_count(address)
+
+
+def build_eip1559_fees(web3, priority_fee_gwei=30, multiplier=2.0):
+    base_fee = None
+    try:
+        block = web3.eth.get_block('pending')
+        base_fee = block.get('baseFeePerGas')
+    except Exception:
+        pass
+
+    priority = None
+    try:
+        priority = getattr(web3.eth, "max_priority_fee")
+    except Exception:
+        priority = None
+
+    if priority is None:
+        priority = Web3.to_wei(priority_fee_gwei, 'gwei')
+
+    if base_fee is not None:
+        max_fee = int(multiplier * int(base_fee)) + int(priority)
+    else:
+        try:
+            gas_price = web3.eth.gas_price
+            max_fee = int(gas_price) + int(priority)
+        except Exception:
+            max_fee = int(priority)
+
+    return {
+        "maxPriorityFeePerGas": int(priority),
+        "maxFeePerGas": int(max_fee),
+    }
+
+
+def build_tx_params(web3, from_addr, chain_id, nonce=None, eip1559=True, priority_fee_gwei=30):
+    if nonce is None:
+        nonce = get_pending_nonce(web3, from_addr)
+
+    params = {
+        "chainId": chain_id,
+        "from": from_addr,
+        "nonce": nonce,
+    }
+
+    if eip1559:
+        fees = build_eip1559_fees(web3, priority_fee_gwei=priority_fee_gwei)
+        params.update(fees)
+    else:
+        try:
+            params["gasPrice"] = web3.eth.gas_price
+        except Exception:
+            pass
+
+    return params
+
+
+def estimate_and_attach_gas(web3, tx, buffer_ratio=1.2):
+    try:
+        gas = web3.eth.estimate_gas(tx)
+        tx["gas"] = int(int(gas) * buffer_ratio)
+    except Exception:
+        pass
+    return tx
+
+
+def send_signed_transaction_with_receipt(web3, signed_tx, timeout=600, poll_interval=2, max_retries=3):
+    raw = get_raw_tx_bytes(signed_tx)
+    if not raw:
+        raise ValueError("Signed transaction missing raw bytes")
+
+    attempt = 0
+    last_error = None
+    tx_hash = None
+
+    while attempt < max_retries:
+        try:
+            tx_hash = web3.eth.send_raw_transaction(raw)
+            receipt = web3.eth.wait_for_transaction_receipt(tx_hash, timeout=timeout)
+            return receipt
+        except TimeExhausted as e:
+            last_error = e
+        except ValueError as e:
+            msg = str(e)
+            if "already known" in msg or "known" in msg:
+                if tx_hash:
+                    try:
+                        receipt = web3.eth.wait_for_transaction_receipt(tx_hash, timeout=timeout)
+                        return receipt
+                    except Exception as e2:
+                        last_error = e2
+            elif ("nonce too low" in msg or
+                  "replacement transaction underpriced" in msg or
+                  "transaction underpriced" in msg):
+                last_error = e
+            elif "insufficient funds" in msg:
+                raise
+            else:
+                last_error = e
+        except Exception as e:
+            last_error = e
+
+        attempt += 1
+        time.sleep(poll_interval * attempt)
+
+    if tx_hash:
+        try:
+            receipt = web3.eth.wait_for_transaction_receipt(tx_hash, timeout=poll_interval * max_retries)
+            return receipt
+        except Exception:
+            pass
+
+    raise RuntimeError(f"Failed to send transaction after {max_retries} attempts: {last_error}")

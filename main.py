@@ -10,6 +10,8 @@ from poly_data.websocket_handlers import connect_market_websocket, connect_user_
 import poly_data.global_state as global_state
 from poly_data.data_processing import remove_from_performing
 from dotenv import load_dotenv
+import warnings
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated as an API.*")
 
 load_dotenv()
 
@@ -95,21 +97,12 @@ async def main():
     update_thread = threading.Thread(target=update_periodically, daemon=True)
     update_thread.start()
     
-    # Main loop - maintain websocket connections
-    while True:
-        try:
-            # Connect to market and user websockets simultaneously
-            await asyncio.gather(
-                connect_market_websocket(global_state.all_tokens), 
-                connect_user_websocket()
-            )
-            print("Reconnecting to the websocket")
-        except:
-            print("Error in main loop")
-            print(traceback.format_exc())
-            
-        await asyncio.sleep(1)
-        gc.collect()  # Clean up memory
+    # Start websocket tasks (each manages its own reconnect loop)
+    market_task = asyncio.create_task(connect_market_websocket(global_state.all_tokens))
+    user_task = asyncio.create_task(connect_user_websocket())
+
+    # Keep main alive while tasks run; do not cross-cancel
+    await asyncio.gather(market_task, user_task, return_exceptions=True)
 
 if __name__ == "__main__":
     asyncio.run(main())

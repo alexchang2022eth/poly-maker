@@ -54,7 +54,7 @@ class PolymarketClient:
         # Don't print sensitive wallet information
         print("Initializing Polymarket client...")
         chain_id=POLYGON
-        self.browser_wallet=Web3.toChecksumAddress(browser_address)
+        self.browser_wallet=Web3.to_checksum_address(browser_address)
 
         # Initialize the Polymarket API client
         self.client = ClobClient(

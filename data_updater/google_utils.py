@@ -4,6 +4,10 @@ import os
 import pandas as pd
 import requests
 import re
+from dotenv import load_dotenv
+
+# Load environment variables from .env in project root
+load_dotenv()
 
 
 def get_spreadsheet(read_only=False):

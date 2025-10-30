@@ -64,10 +64,9 @@ async function mergePositions(amountToMerge, conditionId, isNegRiskMarket) {
     // Log parameters for debugging
     console.log(amountToMerge, conditionId, isNegRiskMarket);
     
-    // Prepare transaction parameters
-    const nonce = await provider.getTransactionCount(wallet.address);
-    const gasPrice = await provider.getGasPrice();
-    const gasLimit = 10000000;  // Set high gas limit to ensure transaction completes
+    // Prepare transaction parameters (EIP-1559)
+    const feeData = await provider.getFeeData();
+    const gasLimit = 10_000_000;  // Set high gas limit to ensure transaction completes
 
     let tx;
     // Different contract calls for different market types
@@ -91,9 +90,6 @@ async function mergePositions(amountToMerge, conditionId, isNegRiskMarket) {
     const transaction = {
       ...tx,
       chainId: 137,       // Polygon chain ID
-      gasPrice: gasPrice,
-      gasLimit: gasLimit,
-      nonce: nonce
     };
 
     // Get the Safe address from environment variables
@@ -102,14 +98,25 @@ async function mergePositions(amountToMerge, conditionId, isNegRiskMarket) {
 
     // Execute the transaction through the Safe
     console.log("Signing Transaction")
+    // Execute the transaction through the Safe with EIP-1559 overrides
+    const overrides = {};
+    if (feeData.maxFeePerGas && feeData.maxPriorityFeePerGas) {
+      overrides.maxFeePerGas = feeData.maxFeePerGas;
+      overrides.maxPriorityFeePerGas = feeData.maxPriorityFeePerGas;
+    }
+    overrides.gasLimit = gasLimit;
+
     const txResponse = await signAndExecuteSafeTransaction(
-      wallet, 
-      safe, 
-      transaction.to, 
-      transaction.data, 
-      { 
-        gasPrice: transaction.gasPrice, 
-        gasLimit: transaction.gasLimit 
+      wallet,
+      safe,
+      transaction.to,
+      transaction.data,
+      overrides,
+      {
+        // Allow tuning via env PRIORITY_FEE_GWEI, falls back in helper if needed
+        maxRetries: 3,
+        backoffMs: 2000,
+        bumpMultiplier: 1.2,
       }
     );
     
