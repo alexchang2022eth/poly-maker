@@ -1,3 +1,6 @@
+# 获取所有有rewards的市场，然后筛选最近24小时结束的
+# 可以work
+
 import argparse
 import json
 import os

@@ -1,3 +1,5 @@
+# 按照polymarket官网计算score的程序，无法验证
+
 import argparse
 import os
 import math

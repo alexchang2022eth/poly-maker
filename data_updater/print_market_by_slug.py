@@ -1,3 +1,5 @@
+# 按照某个市场的slug查询市场详情
+
 import argparse
 import json
 import os

@@ -1,3 +1,6 @@
+# 获取最近要结束的预测市场，时间截取不太好用，需要进一步调研
+# 不一定带rewards
+
 import argparse
 import os
 import json
